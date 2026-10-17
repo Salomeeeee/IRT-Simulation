@@ -1,0 +1,2 @@
+benchmark,model,n_models,n_items,seconds,status,warnings,raw_aligned_theta_mean,raw_aligned_theta_sd,theta_mean,theta_sd,a_mean,a_sd,c_mean,cor_theta_total_score,cor_b_item_mean,cor_a_item_mean,cor_c_item_mean,cor_phat_item_mean,cor_phat_total_score
+arc,3pl,5221,844,13.500180959701538,ok,,-0.6408101281335933,1.618215059834797,-2.041398398084946e-17,0.9999999999999999,3.020817567083362,1.8403280550711067,0.1480268611443302,0.9804550532805516,-0.9773255169536413,0.026101563306820345,0.7449164573989584,0.9978456155822275,0.988707650389352

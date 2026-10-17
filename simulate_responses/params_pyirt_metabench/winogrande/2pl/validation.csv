@@ -1,0 +1,2 @@
+benchmark,model,n_models,n_items,seconds,status,warnings,raw_aligned_theta_mean,raw_aligned_theta_sd,theta_mean,theta_sd,a_mean,a_sd,c_mean,cor_theta_total_score,cor_b_item_mean,cor_a_item_mean,cor_c_item_mean,cor_phat_item_mean,cor_phat_total_score
+winogrande,2pl,6550,1045,11.21471118927002,ok,,2.694135540561139,1.8861660180348088,-4.3391922794509936e-18,1.0,0.7167624991225273,0.3847582854981007,0.0,0.9839846823671735,-0.9832014112515565,0.7923894599818215,,0.9536488039195371,0.9608173586262299

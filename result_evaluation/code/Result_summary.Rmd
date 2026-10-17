@@ -1,0 +1,1616 @@
+---
+title: "NeurIPS Simulation - Results summary"
+author: ""
+date: "2026-05-01"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+setwd("/root/path/result_evaluation/summary_table_all_runs")
+library(tidyverse)
+library(purrr)
+library(scales)
+
+tab10 <- c(
+  "#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD",
+  "#8C564B", "#E377C2", "#7F7F7F", "#BCBD22", "#17BECF"
+)
+
+```
+
+
+# Data wrangling
+
+Load data
+
+```{r}
+# VI
+VI_run_summary <- read.csv('VI_run_summary_4500.csv')
+VI_param_recov <- read.csv('VI_param_recovery_4500.csv')
+# EM
+EM_run_summary <- read.csv('EM_run_summary_4500.csv')
+EM_param_recov <- read.csv('EM_param_recovery_4500.csv')
+# PSN
+PSN_run_summary <- read.csv('PSN_run_summary_4500.csv')
+PSN_param_recov <- read.csv('PSN_param_recovery_4500.csv')
+# MCMC
+MCMC_run_summary <- read.csv('MCMC_run_summary_4500.csv')
+MCMC_param_recov <- read.csv('MCMC_param_recovery_4500.csv')
+
+```
+
+
+
+Merging the run log and overall parameter recovery data
+
+```{r}
+# VI
+VI_run_df <- VI_run_summary %>% 
+  left_join(VI_param_recov, by = c('benchmark', 'irt', 'sample_size', 'rep')) %>% 
+  mutate(method = 'VI')
+
+# EM
+EM_run_df <- EM_run_summary %>% 
+  left_join(EM_param_recov, by = c('benchmark', 'irt', 'sample_size', 'rep'))%>% 
+  mutate(method = 'EM')
+
+# PSN
+PSN_run_df <- PSN_run_summary %>% 
+  left_join(PSN_param_recov, by = c('benchmark', 'irt', 'sample_size', 'rep'))%>% 
+  mutate(method = 'PSN')
+
+# MCMC
+MCMC_run_df <- MCMC_run_summary%>% 
+  left_join(MCMC_param_recov, by = c('benchmark', 'irt', 'sample_size', 'rep'))%>% 
+  mutate(method = 'MCMC')
+
+run_df <- list(VI_run_df, EM_run_df, PSN_run_df, MCMC_run_df) %>%
+  bind_rows()
+
+#write.csv(run_df, file = "run_lv_summary.csv")
+
+```
+
+Run status:
+
+```{r}
+# run_df %>% group_by(benchmark, irt, sample_size, method) %>%
+#   summarise(Finished = sum(finished == TRUE)) %>% 
+#   arrange(Finished) %>% write.csv(file = "finished_runs_table.csv")
+```
+
+Summary of error messages:
+
+```{r}
+#table(run_df$specific_error)
+
+run_df <- run_df %>% mutate(
+    failure_category = case_when(
+      is.na(specific_error) | specific_error == "" ~ NA_character_,
+      grepl("DUE TO TIME LIMIT", specific_error, fixed = TRUE) ~ "Hitting 72-hour time limit",
+      grepl("batch_wrapper_exit_137", specific_error, fixed = TRUE) ~ "Out-of-memory",
+      grepl("An error occured during compilation", specific_error, fixed = TRUE) ~ "MCMC compilation failure",
+      grepl("Expected parameter concentration", specific_error, fixed = TRUE) ~ "Estimation algorithm failure",
+      grepl("MH sampler failed", specific_error, fixed = TRUE) |
+        grepl("non-finite value supplied by 'nlm'", specific_error, fixed = TRUE) |
+        grepl("Lapack routine 'dsyevr'", specific_error, fixed = TRUE) |
+        grepl("Inf or NaN values appeared in the gradient", specific_error, fixed = TRUE) ~ "Estimation algorithm failure",
+      TRUE ~ "Other failure"
+    ),
+     warning_category = case_when(
+      is.na(specific_warning) | specific_warning == "" ~ NA_character_,
+      grepl("CmdStan's precompiled header \\(PCH\\) files may need to be rebuilt\\.", specific_warning) ~ NA_character_,
+      grepl("MHRM terminated after 2000 iterations\\.", specific_warning) ~ "EM non-convergence",
+      grepl("NaNs produced \\| NA/NaN replaced by maximum positive value", specific_warning) ~ "EM non-convergence",
+      grepl("divergence", specific_warning, fixed = TRUE) ~ "Estimation algorithm failure"
+  ),
+    failure_warning_combined  = case_when(
+      !is.na(failure_category) ~ failure_category,
+      !is.na(warning_category) ~ warning_category,
+      TRUE ~ NA_character_
+    ),
+    benchmark = factor(
+      benchmark,
+      levels = c("truthfulqa", "arc", "winogrande", "gsm8k", "hellaswag", "mmlu")
+    ),
+    sample_size = factor(sample_size, levels = c(30, 100, 180, 400, 1000)),
+    method = factor(method, levels = c("EM", "MCMC", "VI", "PSN")),
+    irt = factor(irt, levels = c("1pl", "2pl", "3pl"))
+  )
+
+table(run_df$failure_category, run_df$exit_status)
+table(run_df$warning_category, run_df$exit_status)
+table(run_df$failure_warning_combined, run_df$exit_status)
+
+# merge with the short 100-item benchmark score-total correlation summary
+FI_shortform <- read.csv('top100_fi_score_correlations.csv')
+
+FI_shortform %>% mutate(
+      benchmark = factor(
+      benchmark,
+      levels = c("truthfulqa", "arc", "winogrande", "gsm8k", "hellaswag", "mmlu")
+    ),
+    sample_size = factor(sample_size, levels = c(30, 100, 180, 400, 1000)),
+    method = factor(method, levels = c("EM", "MCMC", "VI", "PSN")),
+    irt = factor(irt, levels = c("1pl", "2pl", "3pl"))
+)->FI_shortform
+
+run_df %>% left_join(FI_shortform, by = c('benchmark', 'irt', 'sample_size', 'rep', 'method'))->run_df
+run_df <- run_df %>%
+  mutate(
+    benchmark = factor(
+      benchmark,
+      levels = c("truthfulqa", "arc", "winogrande", "gsm8k", "hellaswag", "mmlu"),
+      labels = c("TruthfulQA", "ARC-Challenge", "WinoGrande", "GSM8K", "HellaSwag", "MMLU")
+    )
+  )
+
+write.csv(run_df, file = "run_df.csv")
+```
+
+
+Completed and Converged Run Data:
+
+```{r}
+run_df %>% filter(exit_status == TRUE & is.na(failure_warning_combined)) -> run_df_params
+```
+
+
+
+
+# Main question 
+
+Effect of \(N\), \(J\) on reliable estimation of 1/2/3PL using different estimation methods.
+
+```{r}
+summary_by_condition <- run_df %>% group_by(benchmark, irt, sample_size, method) %>% 
+  summarise(fail_rate = sum(!is.na(failure_warning_combined))/sum(finished), 
+            EM_nonconvergence_rate = sum((failure_warning_combined=='EM non-convergence' | 
+                                            failure_warning_combined == 'Estimation algorithm failure'),na.rm = T)/sum(finished),
+            Estimation_alg_failure_rate = sum(failure_warning_combined=='Estimation algorithm failure',na.rm = T)/sum(finished),
+            Maxtime_rate = sum(failure_warning_combined == 'Hitting 72-hour time limit', na.rm = T)/sum(finished),
+            Out_of_mem_rate = sum(failure_warning_combined=='Out-of-memory',na.rm = T)/sum(finished)) %>%
+  mutate(across(where(is.numeric), ~ na_if(.x, NaN)))
+
+summary_by_condition_completed <- run_df_params %>% group_by(benchmark, irt, sample_size, method) %>% 
+  summarise(ave_run_time = mean(run_time, na.rm = TRUE),
+            cor_b_m = mean(cor_b, na.rm = TRUE),
+            cor_b_sd = sd(cor_b, na.rm = TRUE), 
+            cor_a_m = mean(cor_a, na.rm = TRUE), 
+            cor_a_sd = sd(cor_a, na.rm = TRUE), 
+            diff_c_m = mean(diff_c, na.rm = TRUE), 
+            diff_c_sd = sd(diff_c, na.rm = TRUE), 
+            rho_theta_m = mean(cor_theta_pearson, na.rm = TRUE),
+            rho_theta_sd = sd(cor_theta_pearson, na.rm = TRUE),
+            tau_theta_m = mean(cor_theta_kendall, na.rm = TRUE),
+            tau_theta_sd = sd(cor_theta_kendall, na.rm = TRUE),
+            p_diff_m = mean(p_diff_ave, na.rm = TRUE),
+            p_diff_sd = sd(p_diff_ave, na.rm = TRUE),
+            ave_model_m = mean(p_diff_models, na.rm = TRUE), 
+            ave_model_sd = sd(p_diff_models, na.rm = TRUE),
+            ave_item_m = mean(p_diff_items, na.rm = TRUE),
+            ave_item_sd = sd(p_diff_items, na.rm = TRUE),
+            tau_shortform_m = mean(kendall_cor, na.rm = TRUE),
+            tau_shortform_sd = sd(kendall_cor, na.rm = TRUE),
+            rho_shortform_m = mean(pearson_cor, na.rm = TRUE),
+            rho_shortform_sd = sd(pearson_cor, na.rm = TRUE),)%>%
+  mutate(across(where(is.numeric), ~ na_if(.x, NaN)))
+
+#summary_by_condition %>% write.csv(file = "run_summary_by_condition.csv")
+#summary_by_condition_completed %>% write.csv(file = "run_summary_by_condition_completed.csv")
+summary_psn_time <- read.csv('run_summary_by_condition_completed_w_psntime.csv')
+summary_psn_time_clean <- summary_psn_time %>%
+  mutate(
+    benchmark = recode(
+      benchmark,
+      "truthfulqa" = "TruthfulQA",
+      "arc" = "ARC-Challenge",
+      "winogrande" = "WinoGrande",
+      "gsm8k" = "GSM8K",
+      "hellaswag" = "HellaSwag",
+      "mmlu" = "MMLU"
+    ),
+    method = recode(method, "psn" = "PSN", "PSN" = "PSN"),
+    irt = tolower(irt),
+    sample_size = as.character(sample_size)
+  ) %>%
+  mutate(
+    benchmark = factor(benchmark, levels = levels(summary_by_condition_completed$benchmark)),
+    irt = factor(irt, levels = levels(summary_by_condition_completed$irt)),
+    sample_size = factor(sample_size, levels = levels(summary_by_condition_completed$sample_size)),
+    method = factor(method, levels = levels(summary_by_condition_completed$method))
+  )
+summary_by_condition_completed <- summary_by_condition_completed %>%
+  left_join(
+    summary_psn_time_clean %>%
+      select(benchmark, irt, sample_size, method, ave_run_time_psn = ave_run_time),
+    by = c("benchmark", "irt", "sample_size", "method")
+  ) %>%
+  mutate(
+    ave_run_time = coalesce(ave_run_time, ave_run_time_psn)
+  ) %>%
+  select(-ave_run_time_psn)
+```
+
+  
+## 1. Estimation failure, including rate and types.
+
+
+Overall failure rate:
+
+```{r}
+run_df %>% ungroup() %>% 
+  filter(is.na(failure_warning_combined) | failure_warning_combined != 'Hitting 72-hour time limit')%>%
+  group_by(method) %>% 
+  summarize(overall_fail_rate = sum(!is.na(failure_warning_combined))/sum(finished==TRUE))
+
+run_df %>% ungroup() %>% 
+  group_by(method,irt) %>% 
+  summarize(overall_fail_rate = sum(!is.na(failure_warning_combined))/sum(finished==TRUE))
+
+# mcmc oot for other conditions 
+run_df %>% ungroup() %>%
+  filter(method == 'MCMC', benchmark%in% c('HellaSwag','MMLU')) %>%
+  filter(!((benchmark == 'MMLU' & sample_size ==1000) | (benchmark =='MMLU' & sample_size == 400 & irt =='3pl') |
+             (benchmark == 'HellaSwag' & sample_size ==1000 & irt =='3pl'))) %>%
+  summarize(completed = sum(finished), 
+            oot = sum(failure_warning_combined=='Hitting 72-hour time limit', na.rm = T))
+  
+
+```
+
+
+
+
+```{r}
+
+ggplot(
+  summary_by_condition,
+  aes(x = benchmark, y = fail_rate, group = sample_size, color = sample_size)
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_color_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  labs(
+    x = "Benchmark",
+    y = "Failure rate"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  ) 
+```
+
+Note: 
+
+- For VI all errors are "Estimation algorithm failure"
+- For MCMC all errors are "MCMC compilation failure" (related to CmdStan compilation), "Estimation algorithm failure" (divergence), or hitting 72-hour timewall.
+
+
+EM run status decomposition:
+
+```{r}
+library(tidyverse)
+
+bar_df <- run_df %>%
+  filter(method == "EM", finished == TRUE) %>%
+  mutate(
+    run_status = case_when(
+      is.na(failure_warning_combined) | failure_warning_combined == "" ~ "Successful",
+      failure_warning_combined == "EM non-convergence" ~ "Non-convergence",
+      TRUE ~ failure_warning_combined
+    )
+  ) %>%
+  count(benchmark, irt, sample_size, run_status)
+
+status_colors <- c(
+  "Successful" = "#2CA02C",
+  "Non-convergence" = "#FF7F0E",
+  "Out-of-memory" = "#D62728",
+  "Estimation algorithm failure" = "#9467BD"
+)
+
+bar_df <- run_df %>%
+  filter(method == "EM", finished == TRUE) %>%
+  mutate(
+    irt = factor(irt, levels = c("1pl", "2pl", "3pl"), labels = c("1PL", "2PL", "3PL")),
+    run_status = case_when(
+      is.na(failure_warning_combined) | failure_warning_combined == "" ~ "Successful",
+      failure_warning_combined == "EM non-convergence" ~ "Non-convergence",
+      TRUE ~ failure_warning_combined
+    )
+  ) %>%
+  count(benchmark, irt, sample_size, run_status)
+
+
+ggplot(bar_df, aes(x = sample_size, y = n, fill = run_status)) +
+  geom_col(position = "fill", color = "white") +
+  facet_grid(irt ~ benchmark, switch = "x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = status_colors) +
+  labs(
+    x = "Sample size",
+    y = "Percent of finished runs",
+    fill = ""
+  ) +
+  theme_bw() +
+  theme(
+    strip.placement = "outside",
+    strip.background = element_blank(),
+    strip.text.x.bottom = element_text(size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(size = 10),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )->p
+p
+
+ggsave(filename = 'EM_run_summary.svg',plot = p,height = 4.5)
+```
+
+MCMC run status decomposition:
+
+```{r}
+
+mcmc_status_colors <- c(
+  "Successful" = "#2CA02C",
+  "Hitting 72-hour time limit" = "#D62728",
+  "Estimation algorithm failure" = "#FF7F0E"
+)
+
+bar_df <- run_df %>%
+  filter(method == "MCMC", finished == TRUE) %>%
+  mutate(
+    irt = factor(irt, levels = c("1pl", "2pl", "3pl"), labels = c("1PL", "2PL", "3PL")),
+    run_status = case_when(
+      is.na(failure_warning_combined) | failure_warning_combined == "" ~ "Successful",
+      TRUE ~ failure_warning_combined
+    )
+  ) %>%
+  count(benchmark, irt, sample_size, run_status)
+
+ggplot(bar_df, aes(x = sample_size, y = n, fill = run_status)) +
+  geom_col(position = "fill", color = "white") +
+  facet_grid(irt ~ benchmark, switch = "x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = mcmc_status_colors) +
+  labs(
+    x = "Sample size",
+    y = "Percent of finished runs",
+    fill = ""
+  ) +
+  theme_bw() +
+  theme(
+    strip.placement = "outside",
+    strip.background = element_blank(),
+    strip.text.x.bottom = element_text(size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(size = 10),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  ) -> p
+
+p
+
+ggsave(filename = "MCMC_run_summary.svg", plot = p, height = 4.5)
+```
+
+## 2. Computation time.
+
+Appendix
+
+```{r}
+plot_df <- summary_by_condition_completed %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = ave_run_time,
+    group = sample_size_plot,
+    color = sample_size_plot
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_y_log10(labels = label_number()) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Average computation time (seconds)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+
+```
+
+
+## 3. Parameter recovery.
+
+
+
+### A. Item parameters
+
+Across converged replications, summarize the mean, SD, and box plot of:
+
+- \(b\) correlation.
+
+Appendix
+
+```{r}
+plot_df <- summary_by_condition_completed %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = cor_b_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(cor_b_m - cor_b_sd, -1),
+      ymax = pmin(cor_b_m + cor_b_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Correlation: true and estimated b"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+
+```
+
+
+can't find out why - unrelated to skewness 
+
+```{r}
+
+theta_skew <- read_csv("theta_skewness_by_benchmark_irt.csv")
+
+plot_df <- summary_by_condition_completed %>%
+  ungroup() %>%
+  mutate(
+    benchmark_raw = case_when(
+      benchmark == "TruthfulQA" ~ "truthfulqa",
+      benchmark == "ARC-Challenge" ~ "arc",
+      benchmark == "WinoGrande" ~ "winogrande",
+      benchmark == "GSM8K" ~ "gsm8k",
+      benchmark == "HellaSwag" ~ "hellaswag",
+      benchmark == "MMLU" ~ "mmlu"
+    )
+  ) %>%
+  left_join(theta_skew, by = c("benchmark_raw" = "benchmark", "irt")) %>%
+  mutate(
+    method = factor(method, levels = c("EM", "MCMC", "VI", "PSN")),
+    sample_size = factor(sample_size, levels = c(30, 100, 180, 400, 1000)),
+    alpha_level = case_when(
+      sample_size == 30 ~ 1.00,
+      sample_size == 100 ~ 0.85,
+      sample_size == 180 ~ 0.70,
+      sample_size == 400 ~ 0.55,
+      sample_size == 1000 ~ 0.40
+    )
+  )
+
+condition_order <- plot_df %>%
+  distinct(benchmark, irt, theta_skewness) %>%
+  arrange(theta_skewness) %>%
+  mutate(condition = paste0(benchmark, "\n", toupper(irt))) %>%
+  pull(condition)
+
+plot_df %>%
+  mutate(
+    condition = factor(
+      paste0(benchmark, "\n", toupper(irt)),
+      levels = condition_order
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = condition,
+      y = cor_b_m,
+      color = method,
+      alpha = alpha_level
+    )
+  ) +
+  geom_point(
+    position = position_jitter(width = 0.12, height = 0),
+    size = 2.2
+  ) +
+  scale_alpha_identity() +
+  scale_color_manual(values = c(
+    "EM" = "#1F77B4",
+    "MCMC" = "#FF7F0E",
+    "VI" = "#2CA02C",
+    "PSN" = "#D62728"
+  )) +
+  labs(
+    x = "Benchmark and IRT model (ordered by true theta skewness)",
+    y = "Correlation: true vs estimated b",
+    color = "Method"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+```
+
+
+
+
+
+- \(a\) correlation.
+
+
+appendix
+
+```{r}
+plot_df <- summary_by_condition_completed %>%
+  filter(irt %in% c("2pl", "3pl")) %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = cor_a_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(cor_a_m - cor_a_sd, -1),
+      ymax = pmin(cor_a_m + cor_a_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Correlation: True and estimated a"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+
+```
+
+
+- \(c\) abs error, averaged across items.
+
+Appendix
+
+```{r,  fig.width=7, fig.height=3.5}
+plot_df <- summary_by_condition_completed %>%
+  filter(irt %in% c( "3pl")) %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = diff_c_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(diff_c_m - diff_c_sd, -1),
+      ymax = pmin(diff_c_m + diff_c_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Absolute error: Estimated c"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+```
+
+
+ - Average absolute deviation between estimated and true expected average score of item
+ 
+ (this looks extremely similar to the plot based on grand average)
+ 
+ Appendix
+
+```{r}
+plot_df <- summary_by_condition_completed %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = ave_item_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(ave_item_m - ave_item_sd, -1),
+      ymax = pmin(ave_item_m + ave_item_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Absolute error: Estimated item mean"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+
+```
+
+
+
+### B. Model traits
+
+- \(\theta\) Pearson correlation.
+
+```{r}
+ggplot(
+  summary_by_condition_completed,
+  aes(x = benchmark, y = rho_theta_m, group = sample_size, color = sample_size, fill = sample_size)
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(rho_theta_m - rho_theta_sd, -1),
+      ymax = pmin(rho_theta_m + rho_theta_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  scale_fill_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  labs(
+    x = "Benchmark",
+    y = "Pearson correlation: true vs estimated capability"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+```
+
+
+- Kendall's rank correlation
+
+Note: this one is very affected by distribution of capability, especially if the models have very concentrated capabilities in a small region, rank cannot be adequately recovered.
+
+```{r}
+ggplot(
+  summary_by_condition_completed,
+  aes(x = benchmark, y = tau_theta_m, group = sample_size, color = sample_size, fill = sample_size)
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(tau_theta_m - tau_theta_sd, -1),
+      ymax = pmin(tau_theta_m + tau_theta_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  scale_fill_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  labs(
+    x = "Benchmark",
+    y = "Kendall's tau: true vs estimated capability"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+```
+
+
+
+
+
+
+
+ - Average absolute deviation between estimated and true expected model average score on benchmark
+ 
+ Appendix. 
+
+```{r, fig.height=5}
+plot_df <- summary_by_condition_completed %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30)),
+    method = recode(method, "EM" = "MML-EM"),
+    irt = factor(irt, levels = c("1pl", "2pl", "3pl"), labels = c("1PL", "2PL", "3PL"))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = ave_model_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(ave_model_m - ave_model_sd, -1),
+      ymax = pmin(ave_model_m + ave_model_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Absolute error: Estimated model aggregate score"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "right"
+  )->p
+
+ggsave('agg_score_error.svg',plot = p, height = 5)
+
+```
+
+
+
+
+
+
+### C. Response-probability recovery
+
+- Mean absolute deviation between true and estimated probability of correct response:
+
+$$\sum_{i = 1}^N\sum_{j=1}^J |P(Y_{ij} = 1 \mid \theta_i, \boldsymbol\zeta_j) - P(Y_{ij} = 1 \mid \hat\theta_i, \hat{\boldsymbol\zeta_j})|.$$
+
+```{r}
+ggplot(
+  summary_by_condition_completed,
+  aes(x = benchmark, y = p_diff_m, group = sample_size, color = sample_size, fill = sample_size)
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(p_diff_m - p_diff_sd, 0),
+      ymax = p_diff_m + p_diff_sd
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  scale_fill_grey(start = 0.1, end = 0.8, name = "Sample size") +
+  labs(
+    x = "Benchmark",
+    y = "Absolute error in predicted P(correct)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+```
+
+
+
+### D. Inferences about good items - short benchmark construction 
+
+- Selection of items for a 10%-length short benchmark based on average Fisher information on the training sample.
+- For models 1001–5000, compute Pearson/Kendall's correlation of the short-benchmark score with the total score on all items.
+
+```{r}
+plot_df <- summary_by_condition_completed %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = tau_shortform_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(tau_shortform_m - tau_shortform_sd, -1),
+      ymax = pmin(tau_shortform_m + tau_shortform_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Kendall's tau: shortform vs full benchmark score"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+
+```
+
+```{r}
+plot_df <- summary_by_condition_completed %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, irt, benchmark, sample_size_plot)
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = rho_shortform_m,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = pmax(rho_shortform_m - rho_shortform_sd, -1),
+      ymax = pmin(rho_shortform_m + rho_shortform_sd, 1)
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(irt ~ method) +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = "Pearson correlation: shortform vs full benchmark score"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "bottom"
+  )
+
+```
+
+
+
+## A few sub-questions
+
+1. What is a minimum sample size?
+
+2. Do larger benchmarks require larger sample sizes?
+
+3. Are there item or model characteristics that tend to result in consistently worse recovery of correct response probability at the item (or model) level?
+
+4. Comparison of newer estimators, VI and neural, to EM/MCMC. Are they equally reliable?
+
+5. For EM replications that did not reach tolerance, can we trust the estimates?
+
+6. How much advantage does the IRT trait score have over the total average?
+
+7. Model capability distribution: Does this affect ease of estimation or capability scoring?
+
+
+# plots for main text:
+
+### 5.1 Computation
+
+
+
+```{r,fig.width=7, fig.height=2.5}
+plot_df <- summary_by_condition_completed %>%
+  group_by(method, benchmark, sample_size) %>%
+  summarise(
+    ave_run_time = mean(ave_run_time, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, benchmark, sample_size_plot)
+
+
+ggplot(
+  plot_df,
+  aes(x = benchmark, y = ave_run_time, group = sample_size_plot, color = sample_size_plot)
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_wrap(~ method, nrow = 1) +
+  scale_y_log10(labels = label_number()) +
+  scale_color_grey(start = 0.8, end = 0.1, name = "Sample size") +
+  labs(
+    x = "Benchmark",
+    y = "Avg run time (s)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "right"
+  ) -> p
+
+ggsave("comp_time_5.1.svg", plot = p, width = 7, height = 2.5)
+
+
+
+# 
+# ggplot(
+#   plot_df,
+#   aes(x = benchmark, y = ave_run_time, group = method, color = method)
+# ) +
+#   geom_line(linewidth = 0.8) +
+#   geom_point(size = 1.8) +
+#   facet_wrap(~ sample_size, nrow = 1) +
+#   scale_y_log10(labels = label_number()) +
+#   labs(
+#     x = "Benchmark",
+#     y = "Ave run time (seconds)",
+#     color = "Method"
+#   ) +
+#   theme_bw() +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     panel.grid.minor = element_blank(),
+#     strip.background = element_rect(fill = "grey95"),
+#     legend.position = "bottom"
+#   )
+```
+
+
+## 5.2 Capability scoring
+
+main text a version of this
+
+
+```{r}
+
+theta_skew <- read_csv("theta_skewness_by_benchmark_irt.csv")
+
+plot_df <- summary_by_condition_completed %>%
+  ungroup() %>%
+  mutate(
+    benchmark_raw = case_when(
+      benchmark == "TruthfulQA" ~ "truthfulqa",
+      benchmark == "ARC-Challenge" ~ "arc",
+      benchmark == "WinoGrande" ~ "winogrande",
+      benchmark == "GSM8K" ~ "gsm8k",
+      benchmark == "HellaSwag" ~ "hellaswag",
+      benchmark == "MMLU" ~ "mmlu"
+    )
+  ) %>%
+  left_join(theta_skew, by = c("benchmark_raw" = "benchmark", "irt")) %>%
+  mutate(
+    method = factor(method, levels = c("EM", "MCMC", "VI", "PSN")),
+    sample_size = factor(sample_size, levels = c(30, 100, 180, 400, 1000)),
+    alpha_level = case_when(
+      sample_size == 30 ~ 1.00,
+      sample_size == 100 ~ 0.85,
+      sample_size == 180 ~ 0.70,
+      sample_size == 400 ~ 0.55,
+      sample_size == 1000 ~ 0.40
+    )
+  )
+
+condition_order <- plot_df %>%
+  distinct(benchmark, irt, theta_skewness) %>%
+  arrange(theta_skewness) %>%
+  mutate(condition = paste0(benchmark, "\n", toupper(irt))) %>%
+  pull(condition)
+
+plot_df %>%
+  mutate(
+    condition = factor(
+      paste0(benchmark, "\n", toupper(irt)),
+      levels = condition_order
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = condition,
+      y = tau_theta_m,
+      color = method,
+      alpha = alpha_level
+    )
+  ) +
+  geom_point(
+    position = position_jitter(width = 0.12, height = 0),
+    size = 2.2
+  ) +
+  scale_alpha_identity() +
+  scale_color_manual(values = c(
+    "EM" = "#1F77B4",
+    "MCMC" = "#FF7F0E",
+    "VI" = "#2CA02C",
+    "PSN" = "#D62728"
+  )) +
+  labs(
+    x = "Benchmark and IRT model (ordered by true theta skewness)",
+    y = "Kendall's tau: true vs estimated capability",
+    color = "Method"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    legend.position = "right"
+  )->p
+p
+ggsave("tau_by_skewness_5.2.svg", plot = p, width = 7, height = 4)
+
+write.csv(plot_df, file = 'plotdf_tau_by_skewness.csv')
+
+
+```
+
+
+## 5.3 Item analysis 5.4 efficient benchmarking
+
+main text 2pl 
+
+
+```{r, fig.height=5.5}
+library(tidyverse)
+
+random_df <- read_csv("shorttest_cor_random.csv")
+
+plot_df_base <- summary_by_condition_completed %>%
+  filter(irt == "2pl") %>%
+  mutate(
+    method = factor(method, levels = c("EM", "MCMC", "VI", "PSN")),
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, benchmark, sample_size_plot)
+
+plot_df <- bind_rows(
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "b correlation",
+      value = cor_b_m,
+      sd = cor_b_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "a correlation",
+      value = cor_a_m,
+      sd = cor_a_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "Item mean error",
+      value = ave_item_m,
+      sd = ave_item_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "Shortform Kendall",
+      value = tau_shortform_m,
+      sd = tau_shortform_sd
+    )
+) %>%
+  mutate(
+    metric = factor(
+      metric,
+      levels = c("b correlation", "a correlation", "Item mean error", "Shortform Kendall")
+    )
+  )
+
+baseline_df <- random_df %>%
+  filter(irt == "2pl") %>%
+  transmute(
+    benchmark = case_when(
+      benchmark == "truthfulqa" ~ "TruthfulQA",
+      benchmark == "arc" ~ "ARC-Challenge",
+      benchmark == "winogrande" ~ "WinoGrande",
+      benchmark == "gsm8k" ~ "GSM8K",
+      benchmark == "hellaswag" ~ "HellaSwag",
+      benchmark == "mmlu" ~ "MMLU"
+    ),
+    value = tau_rand_m
+  ) %>%
+  crossing(method = c("EM", "MCMC", "VI", "PSN")) %>%
+  mutate(
+    method = factor(method, levels = c("EM", "MCMC", "VI", "PSN")),
+    metric = factor(
+      "Shortform Kendall",
+      levels = c("b correlation", "a correlation", "Item mean error", "Shortform Kendall")
+    ),
+    benchmark = factor(
+      benchmark,
+      levels = unique(as.character(plot_df$benchmark))
+    )
+  )
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = value,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = case_when(
+        metric %in% c("b correlation", "a correlation", "Shortform Kendall") ~ pmax(value - sd, -1),
+        metric == "Item mean error" ~ pmax(value - sd, 0)
+      ),
+      ymax = case_when(
+        metric %in% c("b correlation", "a correlation", "Shortform Kendall") ~ pmin(value + sd, 1),
+        metric == "Item mean error" ~ value + sd
+      )
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  geom_line(
+    data = baseline_df,
+    aes(x = benchmark, y = value, group = 1),
+    inherit.aes = FALSE,
+    color = "black",
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  geom_point(
+    data = baseline_df,
+    aes(x = benchmark, y = value),
+    inherit.aes = FALSE,
+    color = "black",
+    size = 1.6
+  ) +
+  facet_grid(metric ~ method, scales = "free_y") +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = NULL
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "right"
+  ) ->p
+
+ggsave("res_2pl_5.3_5.4.svg", plot = p, width = 7, height = 5.5)
+
+
+
+
+```
+
+
+```{r}
+plot_df_base <- summary_by_condition_completed %>%
+  filter(irt == "1pl") %>%
+  mutate(
+        method = recode(method, "EM" = "MML-EM"),
+
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, benchmark, sample_size_plot)
+
+plot_df <- bind_rows(
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "b correlation",
+      value = cor_b_m,
+      sd = cor_b_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "Item mean error",
+      value = ave_item_m,
+      sd = ave_item_sd
+    )
+) %>%
+  mutate(
+    metric = factor(
+      metric,
+      levels = c("b correlation", "Item mean error")
+    )
+  )
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = value,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = case_when(
+        metric == "b correlation" ~ pmax(value - sd, -1),
+        metric == "Item mean error" ~ pmax(value - sd, 0)
+      ),
+      ymax = case_when(
+        metric == "b correlation" ~ pmin(value + sd, 1),
+        metric == "Item mean error" ~ value + sd
+      )
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(metric ~ method, scales = "free_y") +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = NULL
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "right"
+  ) -> p1
+
+ggsave('1pl_item_recov.svg', plot = p1,height = 4)
+
+```
+
+
+
+```{r}
+plot_df_base <- summary_by_condition_completed %>%
+  filter(irt == "3pl") %>%
+  mutate(
+    method = recode(method, "EM" = "MML-EM"),
+    sample_size_plot = factor(sample_size, levels = c(1000, 400, 180, 100, 30))
+  ) %>%
+  arrange(method, benchmark, sample_size_plot)
+
+plot_df <- bind_rows(
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "b correlation",
+      value = cor_b_m,
+      sd = cor_b_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "a correlation",
+      value = cor_a_m,
+      sd = cor_a_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "c abs. error",
+      value = diff_c_m,
+      sd = diff_c_sd
+    ),
+  plot_df_base %>%
+    transmute(
+      method,
+      benchmark,
+      sample_size,
+      sample_size_plot,
+      metric = "Item mean error",
+      value = ave_item_m,
+      sd = ave_item_sd
+    )
+) %>%
+  mutate(
+    metric = factor(
+      metric,
+      levels = c("b correlation", "a correlation", "c abs. error", "Item mean error")
+    )
+  )
+
+ggplot(
+  plot_df,
+  aes(
+    x = benchmark,
+    y = value,
+    group = sample_size_plot,
+    color = sample_size_plot,
+    fill = sample_size_plot
+  )
+) +
+  geom_ribbon(
+    aes(
+      ymin = case_when(
+        metric %in% c("b correlation", "a correlation") ~ pmax(value - sd, -1),
+        metric %in% c("c RMSE", "Item mean error") ~ pmax(value - sd, 0)
+      ),
+      ymax = case_when(
+        metric %in% c("b correlation", "a correlation") ~ pmin(value + sd, 1),
+        metric %in% c("c RMSE", "Item mean error") ~ value + sd
+      )
+    ),
+    alpha = 0.15,
+    linewidth = 0,
+    color = NA
+  ) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.8) +
+  facet_grid(metric ~ method, scales = "free_y") +
+  scale_color_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  scale_fill_grey(
+    start = 0.8, end = 0.1,
+    breaks = c(30, 100, 180, 400, 1000),
+    name = "Sample size"
+  ) +
+  labs(
+    x = "Benchmark",
+    y = NULL
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    legend.position = "right"
+  ) -> p3
+
+ggsave('3pl_item_recov.svg', plot = p3,height = 6)
+
+```
+
+

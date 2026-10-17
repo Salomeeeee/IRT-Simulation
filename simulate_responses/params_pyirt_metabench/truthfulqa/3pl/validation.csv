@@ -1,0 +1,2 @@
+benchmark,model,n_models,n_items,seconds,status,warnings,raw_aligned_theta_mean,raw_aligned_theta_sd,theta_mean,theta_sd,a_mean,a_sd,c_mean,cor_theta_total_score,cor_b_item_mean,cor_a_item_mean,cor_c_item_mean,cor_phat_item_mean,cor_phat_total_score
+truthfulqa,3pl,5222,644,11.889543294906616,ok,,-1.4583484577867536,1.6907073815200326,-2.7213433004982773e-17,0.9999999999999999,3.444415537941426,2.1457010694543515,0.09848061187199306,0.9883429191504317,-0.9491806415468448,-0.5225755613454268,0.8752326347714069,0.9979669045142768,0.9900249191669095

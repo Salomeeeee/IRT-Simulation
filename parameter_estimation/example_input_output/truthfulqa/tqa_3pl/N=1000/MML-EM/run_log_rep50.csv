@@ -1,0 +1,2 @@
+benchmark,model,sample_size,rep,input_file,method,itemtype,SE,SE_type,NCYCLES,seconds,status,converged,warning,error,n_items,n_items_fit,n_items_omitted,omitted_item_ids,theta_file,item_file
+truthfulqa,3pl,1000,50,/path/analysis/truthfulqa/3pl/resp_sim_rep50.csv,MHRM,3PL,True,MHRM,2000,317.8657236099243,error,,,RuntimeError: MH sampler failed. Model is likely unstable or may need better starting valuesFALSE,,,,,,

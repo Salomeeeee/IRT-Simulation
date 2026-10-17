@@ -1,0 +1,2 @@
+benchmark,model,n_models,n_items,seconds,status,warnings,raw_aligned_theta_mean,raw_aligned_theta_sd,theta_mean,theta_sd,a_mean,a_sd,c_mean,cor_theta_total_score,cor_b_item_mean,cor_a_item_mean,cor_c_item_mean,cor_phat_item_mean,cor_phat_total_score
+hellaswag,2pl,5221,5711,46.70681619644165,ok,,2.374279273110211,2.822197632799851,-3.946703569630895e-17,1.0,1.3502360747696343,0.669803100544339,0.0,0.9950772417653068,-0.9885271311510382,0.7772891798608471,,0.976009823711672,0.9833755190908267

@@ -1,0 +1,2 @@
+benchmark,model,sample_size,rep,input_file,method,itemtype,SE,SE_type,NCYCLES,seconds,status,converged,warning,error,n_items,n_items_fit,n_items_omitted,omitted_item_ids,theta_file,item_file
+truthfulqa,2pl,30,50,/path/analysis/truthfulqa/2pl/resp_sim_rep50.csv,MHRM,2PL,True,MHRM,2000,578.3448677062988,warning,False,MHRM terminated after 2000 iterations.,,644,623,21,"161,211,249,260,345,384,401,455,509,551,558,631,649,662,709,711,750,761,764,794,801",/path/EM_outputs/truthfulqa/2pl/N30/theta_est_rep50.csv,/path/EM_outputs/truthfulqa/2pl/N30/itempars_est_rep50.csv
